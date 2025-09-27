@@ -2,9 +2,9 @@
  * Copyright (c) 2024 Chiradip Mandal
  * Author: Chiradip Mandal
  * Organization: Space-RF.org
- * 
+ *
  * This file is part of DB25 SQL Tokenizer.
- * 
+ *
  * Licensed under the MIT License. See LICENSE file for details.
  */
 
@@ -23,12 +23,17 @@
 #include <cctype>
 #include <map>
 
+
+#ifdef __ARM_FEATURE_CRC32
+#include <arm_acle.h>
+#endif
+
 struct KeywordInfo {
     std::string keyword;
     size_t length;
     uint32_t hash;
     bool is_reserved;
-    
+
     bool operator<(const KeywordInfo& other) const {
         return keyword < other.keyword;
     }
@@ -39,20 +44,46 @@ private:
     std::set<std::string> all_keywords;
     std::set<std::string> reserved_keywords;
     std::set<std::string> contextual_keywords;
-    
+
     static constexpr uint32_t FNV1A_PRIME = 0x01000193;
     static constexpr uint32_t FNV1A_OFFSET = 0x811C9DC5;
-    
-    // FNV-1a hash for compile-time keyword hashing
-    static uint32_t hash_keyword(const std::string& str) {
-        uint32_t hash = FNV1A_OFFSET;
-        for (char c : str) {
-            hash ^= static_cast<uint8_t>(std::toupper(c));
-            hash *= FNV1A_PRIME;
+
+    #ifdef __ARM_FEATURE_CRC32
+        static uint32_t hash_keyword(const std::string& str) {
+            uint32_t hash = 0;
+            const char* data = str.c_str();
+            size_t len = str.length();
+
+            // Process 8 bytes at a time
+            while (len >= 8) {
+                uint32_t chunk;
+                memcpy(&chunk, data, 4);
+                hash = __crc32w(hash, chunk);
+                data += 8;
+                len -= 8;
+            }
+
+            // Handle remaining bytes
+            while (len > 0) {
+                // TEST and test should be the same
+                hash = __crc32b(hash, std::toupper(*data++));
+                len--;
+            }
+
+            return hash;
         }
-        return hash;
-    }
-    
+    #else
+        // FNV-1a hash for compile-time keyword hashing
+        static uint32_t hash_keyword(const std::string& str) {
+            uint32_t hash = FNV1A_OFFSET;
+            for (char c : str) {
+                hash ^= static_cast<uint8_t>(std::toupper(c));
+                hash *= FNV1A_PRIME;
+            }
+            return hash;
+        }
+    #endif
+
 public:
     bool extract_from_ebnf(const std::string& ebnf_file) {
         std::ifstream file(ebnf_file);
@@ -60,10 +91,10 @@ public:
             std::cerr << "Cannot open EBNF file: " << ebnf_file << std::endl;
             return false;
         }
-        
+
         std::string line;
         std::regex terminal_regex("\"([A-Z][A-Z_]*)\"");
-        
+
         // Reserved keywords that cannot be used as identifiers
         reserved_keywords = {
             "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE",
@@ -76,7 +107,7 @@ public:
             "PRIMARY", "FOREIGN", "UNIQUE", "KEY", "REFERENCES",
             "BEGIN", "COMMIT", "ROLLBACK", "TRANSACTION"
         };
-        
+
         // Context-sensitive keywords (can sometimes be identifiers)
         contextual_keywords = {
             "AS", "ON", "IN", "IS", "TO", "SET", "WITH", "FOR",
@@ -102,20 +133,20 @@ public:
             "SAVEPOINT", "RELEASE", "WORK", "CASCADED", "ESCAPE",
             "ILIKE", "UNKNOWN", "PIVOT", "UNPIVOT", "LATERAL"
         };
-        
+
         while (std::getline(file, line)) {
             // Skip comments
             if (line.empty() || (line.size() > 1 && line[0] == '(' && line[1] == '*')) {
                 continue;
             }
-            
+
             // Extract terminals
             auto words_begin = std::sregex_iterator(line.begin(), line.end(), terminal_regex);
             auto words_end = std::sregex_iterator();
-            
+
             for (auto it = words_begin; it != words_end; ++it) {
                 std::string terminal = (*it)[1];
-                
+
                 // Check if it's a keyword (all uppercase with optional underscore)
                 bool is_keyword = true;
                 for (char c : terminal) {
@@ -124,34 +155,34 @@ public:
                         break;
                     }
                 }
-                
+
                 if (is_keyword && terminal.length() > 1 && terminal != "UNKNOWN") {
                     all_keywords.insert(terminal);
                 }
             }
         }
-        
+
         // Remove any duplicates (like UNKNOWN which might appear in EBNF)
         all_keywords.erase("UNKNOWN");
-        
+
         // Merge all keyword sets
         all_keywords.insert(reserved_keywords.begin(), reserved_keywords.end());
         all_keywords.insert(contextual_keywords.begin(), contextual_keywords.end());
-        
+
         std::cout << "Extracted " << all_keywords.size() << " keywords from EBNF" << std::endl;
         std::cout << "  Reserved: " << reserved_keywords.size() << std::endl;
         std::cout << "  Contextual: " << contextual_keywords.size() << std::endl;
-        
+
         return true;
     }
-    
+
     void generate_header(const std::string& output_file) {
         std::ofstream out(output_file);
         if (!out) {
             std::cerr << "Cannot create output file: " << output_file << std::endl;
             return;
         }
-        
+
         // Prepare keyword data (excluding UNKNOWN which is predefined)
         std::vector<KeywordInfo> keywords;
         for (const auto& kw : all_keywords) {
@@ -164,13 +195,13 @@ public:
                 });
             }
         }
-        
+
         // Sort by length first, then alphabetically for binary search optimization
         std::sort(keywords.begin(), keywords.end(), [](const auto& a, const auto& b) {
             if (a.length != b.length) return a.length < b.length;
             return a.keyword < b.keyword;
         });
-        
+
         // Generate header file
         out << "#pragma once\n";
         out << "// Auto-generated from DB25_SQL_GRAMMAR.ebnf\n";
@@ -180,7 +211,7 @@ public:
         out << "#include <cstdint>\n";
         out << "#include <algorithm>\n\n";
         out << "namespace db25 {\n\n";
-        
+
         // Generate keyword enum
         out << "enum class Keyword : uint16_t {\n";
         out << "    UNKNOWN = 0,\n";
@@ -192,13 +223,13 @@ public:
             if (enum_name == "FALSE") enum_name = "KW_FALSE";
             if (enum_name == "DEFAULT") enum_name = "KW_DEFAULT";
             if (enum_name == "CASE") enum_name = "KW_CASE";
-            
+
             out << "    " << enum_name << " = " << (i + 1);
             if (i < keywords.size() - 1) out << ",";
             out << "\n";
         }
         out << "};\n\n";
-        
+
         // Generate keyword table
         out << "struct KeywordEntry {\n";
         out << "    std::string_view text;\n";
@@ -207,11 +238,11 @@ public:
         out << "    Keyword id;\n";
         out << "    bool is_reserved;\n";
         out << "};\n\n";
-        
+
         out << "inline constexpr std::array<KeywordEntry, " << keywords.size() << "> KEYWORDS = {{\n";
         for (size_t i = 0; i < keywords.size(); ++i) {
             const auto& kw = keywords[i];
-            
+
             // Handle C++ reserved words for enum reference
             std::string enum_name = kw.keyword;
             if (enum_name == "NULL") enum_name = "KW_NULL";
@@ -219,8 +250,8 @@ public:
             if (enum_name == "FALSE") enum_name = "KW_FALSE";
             if (enum_name == "DEFAULT") enum_name = "KW_DEFAULT";
             if (enum_name == "CASE") enum_name = "KW_CASE";
-            
-            out << "    {\"" << kw.keyword << "\", " 
+
+            out << "    {\"" << kw.keyword << "\", "
                 << static_cast<int>(kw.length) << ", "
                 << "0x" << std::hex << kw.hash << std::dec << ", "
                 << "Keyword::" << enum_name << ", "
@@ -229,19 +260,20 @@ public:
             out << "\n";
         }
         out << "}};\n\n";
-        
+
+
         // Generate length buckets for optimization
         out << "// Length-based lookup tables for O(log n) search\n";
         std::map<size_t, std::vector<size_t>> length_buckets;
         for (size_t i = 0; i < keywords.size(); ++i) {
             length_buckets[keywords[i].length].push_back(i);
         }
-        
+
         out << "struct LengthBucket {\n";
         out << "    size_t start;\n";
         out << "    size_t count;\n";
         out << "};\n\n";
-        
+
         out << "inline constexpr std::array<LengthBucket, " << length_buckets.size() << "> LENGTH_BUCKETS = {{\n";
         size_t start = 0;
         for (const auto& [len, indices] : length_buckets) {
@@ -249,7 +281,94 @@ public:
             start += indices.size();
         }
         out << "}};\n\n";
-        
+
+        #ifdef __ARM_FEATURE_CRC32
+        // Calculate hash table size (next power of 2 after keywords size * 1.5)
+        size_t table_size = 1;
+        while (table_size < keywords.size() * 3 / 2) {
+            table_size *= 2;
+        }
+
+        out << "// Hash table constants\n";
+        out << "inline constexpr size_t TABLE_SIZE = " << table_size << ";\n";
+        out << "inline constexpr size_t TABLE_MASK = TABLE_SIZE - 1;\n\n";
+
+        // Generate hash table structure
+        out << "struct HashEntry {\n";
+        out << "    const char* text;\n";
+        out << "    uint32_t hash;\n";
+        out << "    Keyword id;\n";
+        out << "};\n\n";
+
+        // Create hash table with linear probing
+        std::vector<const KeywordInfo*> hash_table(table_size, nullptr);
+
+        for (const auto& keyword : keywords) {
+            size_t bucket = keyword.hash & (table_size - 1);
+            while (hash_table[bucket] != nullptr) {
+                bucket = (bucket + 1) & (table_size - 1);
+            }
+            hash_table[bucket] = &keyword;
+        }
+
+        out << "// Hash table for keyword lookup\n";
+        out << "inline constexpr std::array<HashEntry, TABLE_SIZE> HASH_TABLE = {{\n";
+        for (size_t i = 0; i < table_size; ++i) {
+            if (hash_table[i] != nullptr) {
+                const auto& kw = *hash_table[i];
+                out << "    {\"" << kw.keyword << "\", " << kw.hash << ", Keyword::" << kw.keyword << "},\n";
+            } else {
+                out << "    {nullptr, 0, Keyword::UNKNOWN},\n";
+            }
+        }
+        out << "}};\n\n";
+
+        // Generate hash table lookup function
+        out << "[[nodiscard]] inline Keyword find_keyword(std::string_view text) noexcept {\n";
+        out << "    if (text.empty() || text.length() > 32) return Keyword::UNKNOWN;\n";
+        out << "    \n";
+        out << "    // Convert to uppercase for hashing\n";
+        out << "    char upper[32];\n";
+        out << "    for (size_t i = 0; i < text.length(); ++i) {\n";
+        out << "        upper[i] = (text[i] >= 'a' && text[i] <= 'z') ? \n";
+        out << "                   (text[i] - 'a' + 'A') : text[i];\n";
+        out << "    }\n";
+        out << "    upper[text.length()] = '\\0';\n";
+        out << "    \n";
+        out << "    // Compute hash using CRC32\n";
+        out << "    uint32_t hash = 0;\n";
+        out << "    const char* data = upper;\n";
+        out << "    size_t len = text.length();\n";
+        out << "    \n";
+        out << "    // Process 4 bytes at a time\n";
+        out << "    while (len >= 4) {\n";
+        out << "        uint32_t chunk;\n";
+        out << "        memcpy(&chunk, data, 4);\n";
+        out << "        hash = __crc32w(hash, chunk);\n";
+        out << "        data += 4;\n";
+        out << "        len -= 4;\n";
+        out << "    }\n";
+        out << "    \n";
+        out << "    // Process remaining bytes\n";
+        out << "    while (len > 0) {\n";
+        out << "        hash = __crc32b(hash, *data);\n";
+        out << "        data++;\n";
+        out << "        len--;\n";
+        out << "    }\n";
+        out << "    \n";
+        out << "    // Hash table lookup with linear probing\n";
+        out << "    size_t bucket = hash & TABLE_MASK;\n";
+        out << "    while (HASH_TABLE[bucket].text != nullptr) {\n";
+        out << "        if (HASH_TABLE[bucket].hash == hash && \n";
+        out << "            strcasecmp(upper, HASH_TABLE[bucket].text) == 0) {\n";
+        out << "            return HASH_TABLE[bucket].id;\n";
+        out << "        }\n";
+        out << "        bucket = (bucket + 1) & TABLE_MASK;\n";
+        out << "    }\n";
+        out << "    \n";
+        out << "    return Keyword::UNKNOWN;\n";
+        out << "}\n\n";
+        #else
         // Generate perfect hash table for common keywords
         out << "// Fast lookup function\n";
         out << "[[nodiscard]] inline Keyword find_keyword(std::string_view text) noexcept {\n";
@@ -276,7 +395,8 @@ public:
         out << "    \n";
         out << "    return Keyword::UNKNOWN;\n";
         out << "}\n\n";
-        
+        #endif
+
         // SIMD-optimized keyword matcher
         out << "// SIMD-optimized keyword matching\n";
         out << "template<typename Processor>\n";
@@ -308,7 +428,7 @@ public:
         out << "    out_keyword = Keyword::UNKNOWN;\n";
         out << "    return false;\n";
         out << "}\n\n";
-        
+
         out << "// Keyword name lookup\n";
         out << "[[nodiscard]] inline std::string_view keyword_name(Keyword kw) noexcept {\n";
         out << "    if (kw == Keyword::UNKNOWN) return \"UNKNOWN\";\n";
@@ -318,9 +438,9 @@ public:
         out << "    }\n";
         out << "    return \"INVALID\";\n";
         out << "}\n\n";
-        
+
         out << "}  // namespace db25\n";
-        
+
         std::cout << "Generated " << output_file << " with " << keywords.size() << " keywords" << std::endl;
     }
 };
@@ -330,17 +450,17 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: " << argv[0] << " <grammar.ebnf> <output.hpp>" << std::endl;
         return 1;
     }
-    
+
     std::string ebnf_file = argv[1];
     std::string output_file = argv[2];
-    
+
     EBNFKeywordExtractor extractor;
-    
+
     if (!extractor.extract_from_ebnf(ebnf_file)) {
         return 1;
     }
-    
+
     extractor.generate_header(output_file);
-    
+
     return 0;
 }
