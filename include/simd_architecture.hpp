@@ -35,6 +35,28 @@
     #include <arm_neon.h>
 #endif
 
+// ============================================================================
+// Function-level SIMD target attribute helper
+// ============================================================================
+// The SSE4.2 / AVX2 / AVX-512 processors below are chosen at runtime by
+// CpuDetection::detect() (see SimdDispatcher). To let those functions be
+// compiled even when the translation unit is built for a lower, portable
+// baseline (i.e. WITHOUT a global -march flag), each function that uses higher
+// ISA intrinsics is annotated with a GCC/Clang "target" attribute naming the
+// exact feature set its intrinsics require. The compiler then emits those
+// instructions per-function while the rest of the TU stays at the baseline,
+// so the resulting binaries remain portable and only execute the wider paths
+// on CPUs that actually support them (as gated by the runtime dispatch).
+//
+// The attribute is a no-op on MSVC (which permits these intrinsics without a
+// target attribute) and on non-x86 targets (the NEON paths are built for the
+// ARMv8 baseline directly and must stay untouched).
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(_M_X64))
+    #define DB25_TARGET(str) __attribute__((target(str)))
+#else
+    #define DB25_TARGET(str)
+#endif
+
 namespace db25 {
 
 template<typename T>
@@ -102,7 +124,7 @@ class SSE42Processor {
 public:
     static constexpr size_t vector_size() noexcept { return 16; }
     
-    [[nodiscard]] size_t find_whitespace(const std::byte* data, size_t size) const noexcept {
+    [[nodiscard]] DB25_TARGET("sse4.2") size_t find_whitespace(const std::byte* data, size_t size) const noexcept {
         const __m128i whitespace = _mm_set_epi8(
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             '\r', '\n', '\t', ' '
@@ -125,7 +147,7 @@ public:
         return i + scalar.find_whitespace(data + i, size - i);
     }
     
-    [[nodiscard]] size_t skip_whitespace(const std::byte* data, size_t size) const noexcept {
+    [[nodiscard]] DB25_TARGET("sse4.2") size_t skip_whitespace(const std::byte* data, size_t size) const noexcept {
         const __m128i whitespace = _mm_set_epi8(
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             '\r', '\n', '\t', ' '
@@ -159,7 +181,7 @@ class AVX2Processor {
 public:
     static constexpr size_t vector_size() noexcept { return 32; }
     
-    [[nodiscard]] size_t find_whitespace(const std::byte* data, size_t size) const noexcept {
+    [[nodiscard]] DB25_TARGET("avx2") size_t find_whitespace(const std::byte* data, size_t size) const noexcept {
         const __m256i space = _mm256_set1_epi8(' ');
         const __m256i tab = _mm256_set1_epi8('\t');
         const __m256i newline = _mm256_set1_epi8('\n');
@@ -190,7 +212,7 @@ public:
         return i + sse42.find_whitespace(data + i, size - i);
     }
     
-    [[nodiscard]] size_t skip_whitespace(const std::byte* data, size_t size) const noexcept {
+    [[nodiscard]] DB25_TARGET("avx2") size_t skip_whitespace(const std::byte* data, size_t size) const noexcept {
         const __m256i space = _mm256_set1_epi8(' ');
         const __m256i tab = _mm256_set1_epi8('\t');
         const __m256i newline = _mm256_set1_epi8('\n');
@@ -221,7 +243,7 @@ public:
         return i + sse42.skip_whitespace(data + i, size - i);
     }
     
-    [[nodiscard]] bool matches_keyword(const std::byte* data, size_t size,
+    [[nodiscard]] DB25_TARGET("avx2") bool matches_keyword(const std::byte* data, size_t size,
                                       const char* keyword, size_t kw_len) const noexcept {
         if (size < kw_len || kw_len > 32) {
             ScalarProcessor scalar;
@@ -253,7 +275,7 @@ class AVX512Processor {
 public:
     static constexpr size_t vector_size() noexcept { return 64; }
     
-    [[nodiscard]] size_t find_whitespace(const std::byte* data, size_t size) const noexcept {
+    [[nodiscard]] DB25_TARGET("avx512f,avx512bw") size_t find_whitespace(const std::byte* data, size_t size) const noexcept {
         const __m512i space = _mm512_set1_epi8(' ');
         const __m512i tab = _mm512_set1_epi8('\t');
         const __m512i newline = _mm512_set1_epi8('\n');
@@ -280,7 +302,7 @@ public:
         return i + avx2.find_whitespace(data + i, size - i);
     }
     
-    [[nodiscard]] size_t skip_whitespace(const std::byte* data, size_t size) const noexcept {
+    [[nodiscard]] DB25_TARGET("avx512f,avx512bw") size_t skip_whitespace(const std::byte* data, size_t size) const noexcept {
         const __m512i space = _mm512_set1_epi8(' ');
         const __m512i tab = _mm512_set1_epi8('\t');
         const __m512i newline = _mm512_set1_epi8('\n');
