@@ -23,6 +23,10 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(ENABLE_ASAN "Enable Address Sanitizer" OFF)
 option(ENABLE_UBSAN "Enable Undefined Behavior Sanitizer" OFF)
 option(ENABLE_PROFILING "Enable profiling flags" OFF)
+# Opt-in, non-portable build tuned for the host CPU. OFF by default so the
+# default build stays portable: the AVX2/AVX-512 code paths are compiled via
+# per-function target attributes and selected at runtime, not by -march.
+option(ENABLE_NATIVE "Build with -march=native (non-portable, host-tuned)" OFF)
 
 # ==============================================
 # C++ Standard and Compiler Settings
@@ -63,32 +67,28 @@ endif()
 # ==============================================
 include(CheckCXXCompilerFlag)
 
+# NOTE: The AVX2 / AVX-512 (and SSE4.2) code paths in
+# include/simd_architecture.hpp are compiled with per-function target
+# attributes (DB25_TARGET) and selected at RUNTIME via CpuDetection::detect().
+# Because of that, the build does NOT need a global -march flag to emit those
+# instructions, and the default build stays portable across x86_64 CPUs.
+# We only set a conservative SSE4.2 baseline floor here; the wider paths do not
+# depend on this flag. Use -DENABLE_NATIVE=ON for a host-tuned (non-portable)
+# build.
+
 # Detect CPU architecture
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     set(ARCH_X86_64 TRUE)
     message(STATUS "Detected x86_64 architecture")
-    
-    # Check for AVX512
-    check_cxx_compiler_flag("-mavx512f" HAS_AVX512)
-    if(HAS_AVX512)
-        set(SIMD_FLAGS "-mavx512f -mavx512bw")
-        message(STATUS "AVX-512 support detected")
-    else()
-        # Check for AVX2
-        check_cxx_compiler_flag("-mavx2" HAS_AVX2)
-        if(HAS_AVX2)
-            set(SIMD_FLAGS "-mavx2")
-            message(STATUS "AVX2 support detected")
-        else()
-            # Check for SSE4.2
-            check_cxx_compiler_flag("-msse4.2" HAS_SSE42)
-            if(HAS_SSE42)
-                set(SIMD_FLAGS "-msse4.2")
-                message(STATUS "SSE4.2 support detected")
-            endif()
-        endif()
+
+    # Conservative, portable baseline floor. AVX2/AVX-512 are handled by the
+    # runtime dispatch + function target attributes, not by a global flag.
+    check_cxx_compiler_flag("-msse4.2" HAS_SSE42)
+    if(HAS_SSE42)
+        set(SIMD_FLAGS "-msse4.2")
+        message(STATUS "Using SSE4.2 portable baseline (AVX2/AVX-512 via runtime dispatch)")
     endif()
-    
+
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
     set(ARCH_ARM64 TRUE)
     message(STATUS "Detected ARM64 architecture")
@@ -110,14 +110,20 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_compile_definitions(DEBUG)
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     if(NOT COMPILER_IS_MSVC)
-        add_compile_options(-O3 -march=native ${SIMD_FLAGS})
+        add_compile_options(-O3 ${SIMD_FLAGS})
+        if(ENABLE_NATIVE)
+            add_compile_options(-march=native)
+        endif()
     else()
         add_compile_options(/O2 /arch:AVX2)
     endif()
     add_compile_definitions(NDEBUG)
 elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
     if(NOT COMPILER_IS_MSVC)
-        add_compile_options(-O2 -g -march=native ${SIMD_FLAGS})
+        add_compile_options(-O2 -g ${SIMD_FLAGS})
+        if(ENABLE_NATIVE)
+            add_compile_options(-march=native)
+        endif()
     else()
         add_compile_options(/O2 /Zi)
     endif()
@@ -397,10 +403,11 @@ message(STATUS "C++ Standard:      ${CMAKE_CXX_STANDARD}")
 message(STATUS "Compiler:          ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "System:            ${CMAKE_SYSTEM_NAME} ${CMAKE_SYSTEM_PROCESSOR}")
 if(SIMD_FLAGS)
-    message(STATUS "SIMD Flags:        ${SIMD_FLAGS}")
+    message(STATUS "SIMD baseline:     ${SIMD_FLAGS} (AVX2/AVX-512 via runtime dispatch)")
 else()
-    message(STATUS "SIMD Flags:        Native")
+    message(STATUS "SIMD baseline:     default")
 endif()
+message(STATUS "march=native:      ${ENABLE_NATIVE}")
 message(STATUS "Build tests:       ${BUILD_TESTS}")
 message(STATUS "Build tools:       ${BUILD_TOOLS}")
 message(STATUS "ASAN enabled:      ${ENABLE_ASAN}")

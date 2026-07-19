@@ -43,6 +43,13 @@ compile_commands.json
 *.ko
 *.elf
 
+# Compiled analysis tools (build these locally; sources live in analysis/)
+/analysis/lookup_table_analysis
+/analysis/simd_lookup
+
+# Scratch / throwaway files
+temp-delete
+
 # Dependency files
 *.d
 *.dep
