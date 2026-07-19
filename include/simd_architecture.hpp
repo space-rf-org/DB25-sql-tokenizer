@@ -259,7 +259,7 @@ public:
         __m256i data_vec = _mm256_load_si256(reinterpret_cast<const __m256i*>(upper_data));
         __m256i kw_vec = _mm256_load_si256(reinterpret_cast<const __m256i*>(upper_kw));
         
-        const __m256i lower_mask = _mm256_set1_epi8(0xDF);
+        const __m256i lower_mask = _mm256_set1_epi8(static_cast<char>(0xDF));
         data_vec = _mm256_and_si256(data_vec, lower_mask);
         kw_vec = _mm256_and_si256(kw_vec, lower_mask);
         
