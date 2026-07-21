@@ -230,12 +230,14 @@ Token SimdTokenizer::scan_comment(size_t start, size_t start_line, size_t start_
 Token SimdTokenizer::scan_block_comment(size_t start, size_t start_line, size_t start_column) {
         position_ += 2;
         column_ += 2;
-        
+
+        bool terminated = false;
         while (position_ + 1 < input_size_) {
             if (static_cast<uint8_t>(input_[position_]) == '*' &&
                 static_cast<uint8_t>(input_[position_ + 1]) == '/') {
                 position_ += 2;
                 column_ += 2;
+                terminated = true;
                 break;
             } else if (static_cast<uint8_t>(input_[position_]) == '\n') {
                 ++position_;
@@ -246,12 +248,21 @@ Token SimdTokenizer::scan_block_comment(size_t start, size_t start_line, size_t 
                 ++column_;
             }
         }
-        
+
+        // Unterminated block comment: the loop above stops one byte early
+        // (position_ + 1 < input_size_), which would leave a trailing byte to be
+        // re-tokenized as a spurious token. Consume the remainder so the whole
+        // input becomes a single Comment token, mirroring scan_comment's EOF
+        // handling.
+        if (!terminated) {
+            position_ = input_size_;
+        }
+
         std::string_view value(
             reinterpret_cast<const char*>(input_ + start),
             position_ - start
         );
-        
+
         return {TokenType::Comment, value, Keyword::UNKNOWN, start_line, start_column};
     }
 

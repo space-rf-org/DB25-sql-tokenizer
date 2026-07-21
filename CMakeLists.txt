@@ -220,6 +220,16 @@ if(BUILD_TESTS)
             DB25::Tokenizer
     )
 
+    # Block comment test executable - regression test for unterminated block comments
+    add_executable(test_block_comment
+        test/test_block_comment.cpp
+    )
+
+    target_link_libraries(test_block_comment
+        PRIVATE
+            DB25::Tokenizer
+    )
+
     # Copy test data to build directory
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/test/sql_test.sqls
@@ -274,6 +284,16 @@ if(BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "FAIL;should be rejected"
     )
 
+    add_test(
+        NAME BlockCommentTest
+        COMMAND test_block_comment
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(BlockCommentTest PROPERTIES
+        PASS_REGULAR_EXPRESSION "All tests passed. No regressions detected"
+        FAIL_REGULAR_EXPRESSION "FAIL;Failed: [1-9]"
+    )
+
     # Performance regression test - ensure tokenizer is fast enough
     add_test(
         NAME PerformanceTest
@@ -286,7 +306,7 @@ if(BUILD_TESTS)
 
     # Set test properties for all tests
     set_tests_properties(TokenizerBasicTest TokenizerVerboseTest TokenizerOutputTest
-                        OperatorTest InvalidOperatorTest PerformanceTest
+                        OperatorTest InvalidOperatorTest BlockCommentTest PerformanceTest
         PROPERTIES
             TIMEOUT 10
             LABELS "tokenizer"
@@ -295,7 +315,7 @@ if(BUILD_TESTS)
     # Add custom target for running tests
     add_custom_target(check
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
-        DEPENDS test_sql_file test_operators test_invalid_operators
+        DEPENDS test_sql_file test_operators test_invalid_operators test_block_comment
         COMMENT "Running all tokenizer tests with strict validation"
     )
 endif()
