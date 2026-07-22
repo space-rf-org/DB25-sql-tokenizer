@@ -77,6 +77,13 @@ Token SimdTokenizer::next_token() {
             return scan_number(start, start_line, start_column);
         }
 
+        // Leading-dot float: `.5` is a number, not the `.` delimiter. Only when a
+        // digit follows the dot (so member/qualifier `.` and `t.*` are untouched).
+        if (first_char == '.' && position_ + 1 < input_size_ &&
+            is_digit(static_cast<uint8_t>(input_[position_ + 1]))) {
+            return scan_number(start, start_line, start_column);
+        }
+
         if (is_quote(first_char)) {
             return scan_string(start, start_line, start_column, first_char);
         }
@@ -133,6 +140,47 @@ Token SimdTokenizer::scan_identifier_or_keyword(size_t start, size_t start_line,
 Token SimdTokenizer::scan_number(size_t start, size_t start_line, size_t start_column) {
         bool has_dot = false;
         bool has_exp = false;
+
+        // Hex (0x..) / binary (0b..) integer literals: a leading '0' followed by
+        // x/X (base 16) or b/B (base 2) scans the whole prefixed literal as a
+        // single Number token, instead of stopping at the letter and leaving the
+        // rest to be mis-read as an identifier (which turned `0xFF` into `0` + an
+        // alias `xFF`, i.e. a silent value of 0). The value is parsed downstream.
+        if (static_cast<uint8_t>(input_[position_]) == '0' &&
+            position_ + 1 < input_size_) {
+            const uint8_t radix = static_cast<uint8_t>(input_[position_ + 1]);
+            const auto is_hex = [](uint8_t c) {
+                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                       (c >= 'A' && c <= 'F');
+            };
+            if (radix == 'x' || radix == 'X') {
+                position_ += 2;
+                column_ += 2;
+                while (position_ < input_size_ &&
+                       is_hex(static_cast<uint8_t>(input_[position_]))) {
+                    ++position_;
+                    ++column_;
+                }
+                return {TokenType::Number,
+                        std::string_view(reinterpret_cast<const char*>(input_ + start),
+                                         position_ - start),
+                        Keyword::UNKNOWN, start_line, start_column};
+            }
+            if (radix == 'b' || radix == 'B') {
+                position_ += 2;
+                column_ += 2;
+                while (position_ < input_size_ &&
+                       (static_cast<uint8_t>(input_[position_]) == '0' ||
+                        static_cast<uint8_t>(input_[position_]) == '1')) {
+                    ++position_;
+                    ++column_;
+                }
+                return {TokenType::Number,
+                        std::string_view(reinterpret_cast<const char*>(input_ + start),
+                                         position_ - start),
+                        Keyword::UNKNOWN, start_line, start_column};
+            }
+        }
 
         while (position_ < input_size_) {
             uint8_t ch = static_cast<uint8_t>(input_[position_]);
