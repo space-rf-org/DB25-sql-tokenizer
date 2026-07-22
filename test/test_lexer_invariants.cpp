@@ -10,8 +10,14 @@
  *      (the redundant is_keyword_simd fallback was removed). It must therefore
  *      resolve EVERY keyword in the table, in any ASCII case - otherwise a
  *      keyword would silently lex as an identifier.
+ *
+ *   3. Hashed-lookup equivalence. The tokenizer classifies keywords via the O(1)
+ *      find_keyword_hashed() (keyword_lookup.hpp); it must return exactly what
+ *      the generated binary-search find_keyword() returns, for every keyword and
+ *      across a large random-string fuzz.
  */
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -19,6 +25,7 @@
 
 #include "simd_tokenizer.hpp"
 #include "keywords.hpp"
+#include "keyword_lookup.hpp"
 
 using namespace db25;
 
@@ -106,10 +113,44 @@ static void test_keyword_completeness() {
     }
 }
 
+// find_keyword_hashed (the tokenizer's O(1) classifier) must agree with the
+// generated find_keyword everywhere: every keyword in each case, and a large
+// random-string fuzz spanning lengths 0..40 (empty, over-length, digits,
+// underscores, and high bytes), which exercises hits, misses, and the length
+// guards.
+static void test_hashed_lookup_equivalence() {
+    std::printf("hashed-lookup equivalence (keywords + fuzz)\n");
+    for (const auto& e : KEYWORDS) {
+        std::string up(e.text);
+        std::string lo(e.text); for (char& c : lo) if (c >= 'A' && c <= 'Z') c = c - 'A' + 'a';
+        expect(find_keyword_hashed(up) == find_keyword(up), "kw upper '" + up + "'");
+        expect(find_keyword_hashed(lo) == find_keyword(lo), "kw lower '" + lo + "'");
+    }
+    std::uint32_t rng = 0x9e3779b9u;
+    auto next = [&] { rng = rng * 1103515245u + 12345u; return rng; };
+    int mismatches = 0;
+    for (int i = 0; i < 500000; ++i) {
+        const int len = static_cast<int>((next() >> 10) % 41);
+        std::string s;
+        for (int j = 0; j < len; ++j) {
+            const unsigned m = (next() >> 8) % 40;
+            unsigned char ch = m < 26 ? ('a' + m)
+                             : m < 36 ? ('A' + (m - 26))
+                             : m < 37 ? '_'
+                             : m < 39 ? ('0' + (m - 37))
+                                      : static_cast<unsigned char>(0x80 + m);
+            s.push_back(static_cast<char>(ch));
+        }
+        if (find_keyword_hashed(s) != find_keyword(s)) ++mismatches;
+    }
+    expect(mismatches == 0, "500k random strings: hashed == generated find_keyword");
+}
+
 int main() {
     std::printf("DB25 Tokenizer - Lexer Invariants\n=================================\n\n");
     test_positions();
     test_keyword_completeness();
+    test_hashed_lookup_equivalence();
 
     std::printf("\n%s\n", g_fail == 0
         ? "All tests passed. No regressions detected."
