@@ -68,6 +68,7 @@ private:
     Token scan_identifier_or_keyword(size_t start, size_t start_line, size_t start_column);
     Token scan_number(size_t start, size_t start_line, size_t start_column);
     Token scan_string(size_t start, size_t start_line, size_t start_column, uint8_t quote);
+    Token scan_delimited_identifier(size_t start, size_t start_line, size_t start_column);
     Token scan_comment(size_t start, size_t start_line, size_t start_column);
     Token scan_block_comment(size_t start, size_t start_line, size_t start_column);
     Token scan_operator_or_delimiter(size_t start, size_t start_line, size_t start_column);
