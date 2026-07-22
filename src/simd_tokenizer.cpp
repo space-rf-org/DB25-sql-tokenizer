@@ -114,15 +114,21 @@ Token SimdTokenizer::next_token() {
     }
 
 Token SimdTokenizer::scan_identifier_or_keyword(size_t start, size_t start_line, size_t start_column) {
-        while (position_ < input_size_) {
-            uint8_t ch = static_cast<uint8_t>(input_[position_]);
-            if (!is_identifier_cont(ch)) {
-                break;
-            }
-            ++position_;
-            ++column_;
-        }
-        
+        // Scan the identifier run [A-Za-z0-9_]* with a SIMD range check
+        // (scan_identifier), returning the length up to the first non-continuation
+        // byte. This replaces the per-byte is_identifier_cont loop; it is exactly
+        // equivalent (same [A-Za-z0-9_] class) but processes 16/32 bytes at a time.
+        // An identifier can contain no newline, so column_ advances by the run
+        // length and line_ is unchanged.
+        size_t run = dispatcher_.dispatch([this](auto processor) {
+            return processor.scan_identifier(
+                input_ + position_,
+                input_size_ - position_
+            );
+        });
+        position_ += run;
+        column_ += run;
+
         std::string_view value(
             reinterpret_cast<const char*>(input_ + start),
             position_ - start
