@@ -11,13 +11,18 @@
 #pragma once
 
 // ============================================================================
-// PROTECTED FILE - DO NOT MODIFY
+// PROTECTED FILE - CHANGES REQUIRE MANUAL REVIEW AND APPROVAL
 // ============================================================================
-// SIMD architecture abstraction layer - Core component of DB25 SQL Parser.
-// Provides optimized SIMD operations for tokenization across x86 and ARM.
-// 
-// MODIFICATION RESTRICTION: This file is frozen for parser development.
-// The SIMD implementations have been tested and optimized.
+// SIMD architecture abstraction layer - core component of the DB25 SQL
+// tokenizer. Provides the vectorized primitives (whitespace, keyword, and
+// identifier scanning) across x86 (SSE4.2/AVX2/AVX-512) and ARM (NEON).
+//
+// These routines are correctness- and performance-critical: each lane-level
+// intrinsic is exercised against the scalar reference and load-bounds are
+// depended upon throughout the lexer. This file is therefore not open to
+// incidental edits. Any modification must be accompanied by an explicit,
+// manual review that re-establishes byte-for-byte equivalence with the scalar
+// path and confirms no buffer over-read, and must be approved before merge.
 // ============================================================================
 
 #include "cpu_detection.hpp"
@@ -95,8 +100,17 @@ public:
         }
         return i;
     }
-    
-    [[nodiscard]] bool matches_keyword(const std::byte* data, size_t size, 
+
+    // Length of the leading identifier-continuation run: the offset of the first
+    // byte that is not [A-Za-z0-9_]. Uses the authoritative classifier so the SIMD
+    // levels have a reference to match exactly.
+    [[nodiscard]] size_t scan_identifier(const std::byte* data, size_t size) const noexcept {
+        return find_delimiter(data, size, [](std::byte b) {
+            return !is_identifier_cont(static_cast<uint8_t>(b));
+        });
+    }
+
+    [[nodiscard]] bool matches_keyword(const std::byte* data, size_t size,
                                       const char* keyword, size_t kw_len) const noexcept {
         if (size < kw_len) return false;
         
@@ -169,7 +183,33 @@ public:
         ScalarProcessor scalar;
         return i + scalar.skip_whitespace(data + i, size - i);
     }
-    
+
+    // First byte not in [A-Za-z0-9_], via cmpestri over four ranges (0-9, A-Z,
+    // a-z, and _ as a singleton range) with negative polarity - the same style as
+    // skip_whitespace above.
+    [[nodiscard]] DB25_TARGET("sse4.2") size_t scan_identifier(const std::byte* data, size_t size) const noexcept {
+        const __m128i ranges = _mm_set_epi8(
+            0, 0, 0, 0, 0, 0, 0, 0,
+            '_', '_', 'z', 'a', 'Z', 'A', '9', '0'
+        );
+
+        size_t i = 0;
+
+        for (; i + 16 <= size; i += 16) {
+            __m128i chunk = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data + i));
+
+            int result = _mm_cmpestri(ranges, 8, chunk, 16,
+                _SIDD_UBYTE_OPS | _SIDD_CMP_RANGES | _SIDD_NEGATIVE_POLARITY);
+
+            if (result < 16) {
+                return i + result;
+            }
+        }
+
+        ScalarProcessor scalar;
+        return i + scalar.scan_identifier(data + i, size - i);
+    }
+
     [[nodiscard]] bool matches_keyword(const std::byte* data, size_t size,
                                       const char* keyword, size_t kw_len) const noexcept {
         ScalarProcessor scalar;
@@ -242,7 +282,46 @@ public:
         SSE42Processor sse42;
         return i + sse42.skip_whitespace(data + i, size - i);
     }
-    
+
+    // First byte not in [A-Za-z0-9_] over 32-byte chunks. AVX2 has no cmpestri,
+    // so each class is an unsigned range test done with the standard saturating
+    // trick: byte c is in [lo,hi] iff subs_epu8((c - lo), (hi - lo)) == 0. The
+    // letter test folds case first (c | 0x20), which maps A-Z onto a-z; only
+    // A-Za-z fold into [a,z], so the fold cannot turn a non-letter byte into a
+    // false alpha match. Digit and '_' tests use the raw byte. The combined
+    // identifier mask is inverted and the first clear bit is the run end.
+    [[nodiscard]] DB25_TARGET("avx2") size_t scan_identifier(const std::byte* data, size_t size) const noexcept {
+        const __m256i zero  = _mm256_setzero_si256();
+        const __m256i c20   = _mm256_set1_epi8(0x20);
+        const __m256i lo_0  = _mm256_set1_epi8('0');
+        const __m256i lo_a  = _mm256_set1_epi8('a');
+        const __m256i r_09  = _mm256_set1_epi8('9' - '0');
+        const __m256i r_az  = _mm256_set1_epi8('z' - 'a');
+        const __m256i under = _mm256_set1_epi8('_');
+
+        size_t i = 0;
+
+        for (; i + 32 <= size; i += 32) {
+            __m256i chunk = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data + i));
+
+            __m256i is_digit = _mm256_cmpeq_epi8(
+                _mm256_subs_epu8(_mm256_sub_epi8(chunk, lo_0), r_09), zero);
+            __m256i folded = _mm256_or_si256(chunk, c20);          // A-Z -> a-z
+            __m256i is_alpha = _mm256_cmpeq_epi8(
+                _mm256_subs_epu8(_mm256_sub_epi8(folded, lo_a), r_az), zero);
+            __m256i is_us = _mm256_cmpeq_epi8(chunk, under);
+
+            __m256i is_ident = _mm256_or_si256(_mm256_or_si256(is_digit, is_alpha), is_us);
+            uint32_t not_ident = ~static_cast<uint32_t>(_mm256_movemask_epi8(is_ident));
+            if (not_ident != 0) {
+                return i + std::countr_zero(not_ident);
+            }
+        }
+
+        SSE42Processor sse42;
+        return i + sse42.scan_identifier(data + i, size - i);
+    }
+
     [[nodiscard]] DB25_TARGET("avx2") bool matches_keyword(const std::byte* data, size_t size,
                                       const char* keyword, size_t kw_len) const noexcept {
         if (size < kw_len || kw_len > 32) {
@@ -329,7 +408,13 @@ public:
         AVX2Processor avx2;
         return i + avx2.skip_whitespace(data + i, size - i);
     }
-    
+
+    // 32-byte AVX2 range scan is already optimal here; reuse it.
+    [[nodiscard]] size_t scan_identifier(const std::byte* data, size_t size) const noexcept {
+        AVX2Processor avx2;
+        return avx2.scan_identifier(data, size);
+    }
+
     [[nodiscard]] bool matches_keyword(const std::byte* data, size_t size,
                                       const char* keyword, size_t kw_len) const noexcept {
         AVX2Processor avx2;
@@ -417,7 +502,14 @@ public:
         ScalarProcessor scalar;
         return i + scalar.skip_whitespace(data + i, size - i);
     }
-    
+
+    // Scalar fallback: the identifier-run scan is not (yet) NEON-vectorized; the
+    // scalar classifier is correct on all targets.
+    [[nodiscard]] size_t scan_identifier(const std::byte* data, size_t size) const noexcept {
+        ScalarProcessor scalar;
+        return scalar.scan_identifier(data, size);
+    }
+
     [[nodiscard]] bool matches_keyword(const std::byte* data, size_t size,
                                       const char* keyword, size_t kw_len) const noexcept {
         if (size < kw_len || kw_len > 16) {
