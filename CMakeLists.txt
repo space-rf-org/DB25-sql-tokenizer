@@ -230,6 +230,16 @@ if(BUILD_TESTS)
             DB25::Tokenizer
     )
 
+    # Number-literal test executable - hex/binary/leading-dot literal boundaries
+    add_executable(test_number_literals
+        test/test_number_literals.cpp
+    )
+
+    target_link_libraries(test_number_literals
+        PRIVATE
+            DB25::Tokenizer
+    )
+
     # Copy test data to build directory
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/test/sql_test.sqls
@@ -294,6 +304,16 @@ if(BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "FAIL;Failed: [1-9]"
     )
 
+    add_test(
+        NAME NumberLiteralTest
+        COMMAND test_number_literals
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(NumberLiteralTest PROPERTIES
+        PASS_REGULAR_EXPRESSION "All tests passed. No regressions detected"
+        FAIL_REGULAR_EXPRESSION "FAIL;Failed: [1-9]"
+    )
+
     # Performance regression test - ensure tokenizer is fast enough
     add_test(
         NAME PerformanceTest
@@ -306,7 +326,8 @@ if(BUILD_TESTS)
 
     # Set test properties for all tests
     set_tests_properties(TokenizerBasicTest TokenizerVerboseTest TokenizerOutputTest
-                        OperatorTest InvalidOperatorTest BlockCommentTest PerformanceTest
+                        OperatorTest InvalidOperatorTest BlockCommentTest
+                        NumberLiteralTest PerformanceTest
         PROPERTIES
             TIMEOUT 10
             LABELS "tokenizer"
@@ -316,6 +337,7 @@ if(BUILD_TESTS)
     add_custom_target(check
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
         DEPENDS test_sql_file test_operators test_invalid_operators test_block_comment
+                test_number_literals
         COMMENT "Running all tokenizer tests with strict validation"
     )
 endif()
