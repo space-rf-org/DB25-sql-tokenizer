@@ -10,6 +10,7 @@
 
 #include "simd_tokenizer.hpp"
 #include "char_classifier.hpp"
+#include "keyword_lookup.hpp"  // find_keyword_hashed - O(1) keyword classification
 
 #include <cstring>  // std::memchr (vectorized newline scan in update_position)
 
@@ -127,14 +128,11 @@ Token SimdTokenizer::scan_identifier_or_keyword(size_t start, size_t start_line,
             position_ - start
         );
         
-        // find_keyword is a complete, case-insensitive lookup over the whole
-        // keyword table (binary search after ASCII-upcasing), so it is
-        // authoritative: if it returns UNKNOWN the lexeme is not a keyword in any
-        // case. The previous SIMD fallback (is_keyword_simd) only ran after this
-        // returned UNKNOWN and checked the SAME table with the SAME case-folding,
-        // so it could never turn an identifier into a keyword - it was dead work
-        // on every identifier. Removed.
-        Keyword kw = find_keyword(value);
+        // Classify as keyword or identifier. find_keyword_hashed is an O(1)
+        // linear-probe hash over the generated keyword table (keyword_lookup.hpp)
+        // and returns exactly what the generated binary-search find_keyword would,
+        // case-insensitively - it is authoritative, so no SIMD fallback is needed.
+        Keyword kw = find_keyword_hashed(value);
         TokenType type = (kw != Keyword::UNKNOWN) ? TokenType::Keyword : TokenType::Identifier;
 
         return {type, value, kw, start_line, start_column};
