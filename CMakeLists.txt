@@ -250,6 +250,16 @@ if(BUILD_TESTS)
             DB25::Tokenizer
     )
 
+    # Lexer-invariants test - position tracking + keyword-table completeness
+    add_executable(test_lexer_invariants
+        test/test_lexer_invariants.cpp
+    )
+
+    target_link_libraries(test_lexer_invariants
+        PRIVATE
+            DB25::Tokenizer
+    )
+
     # Copy test data to build directory
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/test/sql_test.sqls
@@ -334,6 +344,16 @@ if(BUILD_TESTS)
         FAIL_REGULAR_EXPRESSION "FAIL;Failed: [1-9]"
     )
 
+    add_test(
+        NAME LexerInvariantsTest
+        COMMAND test_lexer_invariants
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    set_tests_properties(LexerInvariantsTest PROPERTIES
+        PASS_REGULAR_EXPRESSION "All tests passed. No regressions detected"
+        FAIL_REGULAR_EXPRESSION "FAIL;FAILURES"
+    )
+
     # Performance regression test - ensure tokenizer is fast enough
     add_test(
         NAME PerformanceTest
@@ -347,7 +367,8 @@ if(BUILD_TESTS)
     # Set test properties for all tests
     set_tests_properties(TokenizerBasicTest TokenizerVerboseTest TokenizerOutputTest
                         OperatorTest InvalidOperatorTest BlockCommentTest
-                        NumberLiteralTest DelimitedIdentifierTest PerformanceTest
+                        NumberLiteralTest DelimitedIdentifierTest
+                        LexerInvariantsTest PerformanceTest
         PROPERTIES
             TIMEOUT 10
             LABELS "tokenizer"
@@ -357,7 +378,7 @@ if(BUILD_TESTS)
     add_custom_target(check
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
         DEPENDS test_sql_file test_operators test_invalid_operators test_block_comment
-                test_number_literals test_delimited_identifier
+                test_number_literals test_delimited_identifier test_lexer_invariants
         COMMENT "Running all tokenizer tests with strict validation"
     )
 endif()
