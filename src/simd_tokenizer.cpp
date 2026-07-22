@@ -84,10 +84,19 @@ Token SimdTokenizer::next_token() {
             return scan_number(start, start_line, start_column);
         }
 
+        // Double quote opens a delimited identifier (standard SQL / PostgreSQL /
+        // DuckDB), NOT a string literal: "select" is a column named select, and
+        // "user name" a column whose name has a space. It must be intercepted
+        // before the generic quote path, which would otherwise lex it as a
+        // String. Single quotes still make a string literal below.
+        if (first_char == '"') {
+            return scan_delimited_identifier(start, start_line, start_column);
+        }
+
         if (is_quote(first_char)) {
             return scan_string(start, start_line, start_column, first_char);
         }
-        
+
         if (first_char == '-' && position_ + 1 < input_size_ &&
             static_cast<uint8_t>(input_[position_ + 1]) == '-') {
             return scan_comment(start, start_line, start_column);
@@ -250,6 +259,55 @@ Token SimdTokenizer::scan_string(size_t start, size_t start_line, size_t start_c
         );
         
         return {TokenType::String, value, Keyword::UNKNOWN, start_line, start_column};
+    }
+
+Token SimdTokenizer::scan_delimited_identifier(size_t start, size_t start_line, size_t start_column) {
+        // start points at the opening '"'. The token value is the INNER text
+        // (the surrounding quotes stripped) so downstream code sees a plain
+        // identifier and never keyword-matches it. A doubled quote ("") inside
+        // is the SQL escape for one '"' and does not terminate the identifier;
+        // the escape is left un-collapsed in the value (a rare shape) so the
+        // lexer stays allocation-free - only the token boundary matters here.
+        (void)start;
+        ++position_;  // consume opening quote
+        ++column_;
+        const size_t inner_start = position_;
+
+        while (position_ < input_size_) {
+            uint8_t ch = static_cast<uint8_t>(input_[position_]);
+            if (ch == '"') {
+                if (position_ + 1 < input_size_ &&
+                    static_cast<uint8_t>(input_[position_ + 1]) == '"') {
+                    position_ += 2;  // escaped "" - part of the identifier
+                    column_ += 2;
+                    continue;
+                }
+                // Closing quote: value spans the inner text, quote excluded.
+                std::string_view value(
+                    reinterpret_cast<const char*>(input_ + inner_start),
+                    position_ - inner_start);
+                ++position_;  // consume closing quote
+                ++column_;
+                return {TokenType::Identifier, value, Keyword::UNKNOWN,
+                        start_line, start_column};
+            }
+            if (ch == '\n') {
+                ++position_;
+                ++line_;
+                column_ = 1;
+            } else {
+                ++position_;
+                ++column_;
+            }
+        }
+
+        // Unterminated: take the inner text to end of input (mirrors the string
+        // scanner's lenient EOF handling) rather than dropping the token.
+        std::string_view value(
+            reinterpret_cast<const char*>(input_ + inner_start),
+            position_ - inner_start);
+        return {TokenType::Identifier, value, Keyword::UNKNOWN,
+                start_line, start_column};
     }
 
 Token SimdTokenizer::scan_comment(size_t start, size_t start_line, size_t start_column) {
