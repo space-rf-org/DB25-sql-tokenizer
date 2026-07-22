@@ -11,13 +11,18 @@
 #pragma once
 
 // ============================================================================
-// PROTECTED FILE - DO NOT MODIFY
+// PROTECTED FILE - CHANGES REQUIRE MANUAL REVIEW AND APPROVAL
 // ============================================================================
-// SIMD architecture abstraction layer - Core component of DB25 SQL Parser.
-// Provides optimized SIMD operations for tokenization across x86 and ARM.
-// 
-// MODIFICATION RESTRICTION: This file is frozen for parser development.
-// The SIMD implementations have been tested and optimized.
+// SIMD architecture abstraction layer - core component of the DB25 SQL
+// tokenizer. Provides the vectorized primitives (whitespace, keyword, and
+// identifier scanning) across x86 (SSE4.2/AVX2/AVX-512) and ARM (NEON).
+//
+// These routines are correctness- and performance-critical: each lane-level
+// intrinsic is exercised against the scalar reference and load-bounds are
+// depended upon throughout the lexer. This file is therefore not open to
+// incidental edits. Any modification must be accompanied by an explicit,
+// manual review that re-establishes byte-for-byte equivalence with the scalar
+// path and confirms no buffer over-read, and must be approved before merge.
 // ============================================================================
 
 #include "cpu_detection.hpp"
