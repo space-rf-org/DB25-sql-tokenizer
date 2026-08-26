@@ -47,6 +47,13 @@ struct Token {
     Keyword keyword_id;  // If type == Keyword, this contains the keyword ID
     size_t line;
     size_t column;
+    // True when this identifier came from a double-quoted (delimited) form:
+    // `"select"`, `"current_date"`. The value has the quotes stripped and
+    // keyword_id cleared, so a delimited identifier is otherwise byte-identical
+    // to a bare one - this flag is the only signal that lets a consumer keep a
+    // delimited identifier a plain identifier (never keyword/function matched),
+    // per the SQL delimited-identifier rule. False for every other token.
+    bool delimited = false;
 };
 
 class SimdTokenizer {
