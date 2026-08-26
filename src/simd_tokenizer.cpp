@@ -287,7 +287,7 @@ Token SimdTokenizer::scan_delimited_identifier(size_t start, size_t start_line, 
                 ++position_;  // consume closing quote
                 ++column_;
                 return {TokenType::Identifier, value, Keyword::UNKNOWN,
-                        start_line, start_column};
+                        start_line, start_column, /*delimited=*/true};
             }
             if (ch == '\n') {
                 ++position_;
@@ -305,7 +305,7 @@ Token SimdTokenizer::scan_delimited_identifier(size_t start, size_t start_line, 
             reinterpret_cast<const char*>(input_ + inner_start),
             position_ - inner_start);
         return {TokenType::Identifier, value, Keyword::UNKNOWN,
-                start_line, start_column};
+                start_line, start_column, /*delimited=*/true};
     }
 
 Token SimdTokenizer::scan_comment(size_t start, size_t start_line, size_t start_column) {

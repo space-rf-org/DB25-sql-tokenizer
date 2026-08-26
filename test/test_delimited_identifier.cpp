@@ -137,6 +137,36 @@ int main() {
         if (run(t)) ++passed; else ++failed;
     }
 
+    // The `delimited` flag distinguishes a double-quoted identifier from a bare
+    // one (both otherwise byte-identical), so a consumer can keep it a plain
+    // identifier and never keyword/function-match it. current_date is not a
+    // keyword, so both forms tokenize as Identifier - only the flag differs.
+    struct DelimCase { std::string sql; bool want; };
+    const std::vector<DelimCase> delim_cases = {
+        {"\"current_date\"", true}, {"\"foo\"", true}, {"\"select\"", true},
+        {"current_date", false},    {"foo", false},
+    };
+    for (const auto& c : delim_cases) {
+        SimdTokenizer tk(reinterpret_cast<const std::byte*>(c.sql.data()), c.sql.size());
+        const auto toks = tk.tokenize();
+        bool ok = false;
+        for (const auto& tok : toks) {
+            if (tok.type == TokenType::Identifier) {
+                ok = (tok.delimited == c.want);
+                break;
+            }
+        }
+        if (ok) {
+            ++passed;
+            std::cout << "  [PASS] delimited(" << c.sql << ") == "
+                      << (c.want ? "true" : "false") << "\n";
+        } else {
+            ++failed;
+            std::cout << "  [FAIL] delimited(" << c.sql << ") expected "
+                      << (c.want ? "true" : "false") << "\n";
+        }
+    }
+
     std::cout << "\n" << std::string(50, '=') << "\n";
     std::cout << "Total: " << tests.size() << "  Passed: " << passed
               << "  Failed: " << failed << "\n";
