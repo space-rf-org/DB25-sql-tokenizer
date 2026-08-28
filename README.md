@@ -43,7 +43,7 @@ A high-performance SQL tokenizer leveraging SIMD instructions for blazing-fast l
 
 ```bash
 # Clone the repository
-git clone https://github.com/Space-RF/DB25-sql-tokenizer.git
+git clone https://github.com/space-rf-org/DB25-sql-tokenizer.git
 cd DB25-sql-tokenizer
 
 # Build with CMake
