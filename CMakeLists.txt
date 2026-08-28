@@ -35,6 +35,16 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Supported toolchain: GCC 14+ (the DB25 stack's CI baseline). Surface an older
+# GCC as a clear, actionable message rather than a deep C++23 template error. A
+# soft warning, not a hard error, so other C++23 compilers can still be tried at
+# the user's own risk (they are not exercised in the project's CI).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+    message(WARNING
+        "DB25 targets GCC 14+ (the supported, CI-tested toolchain); "
+        "detected GCC ${CMAKE_CXX_COMPILER_VERSION}, which is older and unsupported.")
+endif()
+
 # Export compile commands for IDE support
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
