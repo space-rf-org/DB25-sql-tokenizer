@@ -35,7 +35,8 @@ A high-performance SQL tokenizer leveraging SIMD instructions for blazing-fast l
 
 ### Prerequisites
 
-- C++23 compatible compiler (Clang 15+, GCC 13+, MSVC 2022+)
+- **GCC 14+** — the DB25 stack's supported toolchain (other C++23 compilers such
+  as Clang or MSVC may work but are not exercised in the project's CI)
 - CMake 3.20+
 - CPU with SIMD support (most modern processors)
 
